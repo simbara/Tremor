@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:TitleWindow xmlns:fx="http://ns.adobe.com/mxml/2009" 
+					   xmlns:s="library://ns.adobe.com/flex/spark" 
+					   xmlns:mx="library://ns.adobe.com/flex/mx"
+					   creationComplete ="positionPopUp()" skinClass="CustomPopupSkin"
+					   width = "380" height="240" title="Enter Unique ID" fontSize = "30" fontWeight="normal"
+					   backgroundColor="black" backgroundAlpha="0.8" borderColor="black" borderAlpha="0.8" 
+					   cornerRadius="0">
+	<s:layout>
+		<s:VerticalLayout/>
+	</s:layout>
+	<fx:Declarations>
+		<!-- Place non-visual elements (e.g., services, value objects) here -->
+	</fx:Declarations>
+	
+	<!-- <fx:Script source="userProfile.as"/> -->
+	
+
+	<fx:Script>
+		<![CDATA[
+		
+		import mx.managers.PopUpManager;
+			
+		public var _stat:String; // status for logging purposes
+		public var currID:String; //Unique user ID
+
+
+		/* Position pop up window */
+		private function positionPopUp():void
+		{
+			PopUpManager.centerPopUp(this);
+		}
+	
+		/* Get the ID & continue to application */
+		private function getUserInfo():void 
+		{
+			//save id in global var
+			currID = idField.text; 
+			_stat = "Getting User ID " + currID + "......."; trace(_stat);
+			PopUpManager.removePopUp(this); 
+			_stat = "Pop up closed ..."; trace(_stat);
+		}
+		]]>
+	</fx:Script>
+	
+	<!-- <mx:Form id="idForm">
+		<mx:FormItem labelStyleName="labels" label="Unique ID:">
+			<s:TextInput id="idField" text=""/>
+		</mx:FormItem> -->
+		<!-- <mx:FormItem label="Password">
+			<mx:TextInput id="password" 
+						  displayAsPassword="true" 
+						  width="100%"/>
+		</mx:FormItem> -->
+	<!-- </mx:Form> -->
+	
+	<s:VGroup verticalAlign="middle" paddingTop="16" paddingLeft="9">
+		
+	<s:TextInput id="idField" text="" width="80%" height="50" paddingBottom="5"/>
+		<s:Button id="continueButton" enabled = "true" click="getUserInfo();" label="Continue" 
+				  width="180" height="61" fontSize="31"/>
+		<!-- <mx:Button 
+			label="Cancel"
+			click="PopUpManager.removePopUp(this);"/> -->
+	</s:VGroup>
+
+</s:TitleWindow>

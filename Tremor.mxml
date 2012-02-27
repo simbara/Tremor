@@ -1,0 +1,401 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:Application xmlns:fx="http://ns.adobe.com/mxml/2009" 
+			   xmlns:s="library://ns.adobe.com/flex/spark" 
+			   xmlns:mx="library://ns.adobe.com/flex/mx"
+			   applicationComplete="onAddedToStage(event)"
+			   width="480" height="854" currentState="start">
+	<s:layout>
+		<s:BasicLayout/>
+	</s:layout>
+	
+	<fx:Script>
+		<![CDATA[
+			import flash.display.Sprite;
+			import flash.events.AccelerometerEvent;
+			import flash.events.Event;
+			import flash.events.MouseEvent;
+			import flash.events.TimerEvent;
+			import flash.filesystem.*;
+			import flash.sensors.Accelerometer;
+			import flash.text.TextField;
+			import flash.utils.*;
+			
+			import mx.collections.ArrayCollection;
+			import mx.controls.Alert;
+			import mx.core.IFlexDisplayObject;
+			import mx.core.UIComponent;
+			import mx.events.FileEvent;
+			import mx.formatters.DateFormatter;
+			import mx.managers.PopUpManager;
+			import mx.utils.NameUtil;
+			
+			import org.osmf.metadata.StringIdentifier;
+			
+			import spark.components.Button;
+			import spark.components.TextArea;
+			import spark.components.TextInput;
+			import spark.components.TitleWindow;
+			
+			private var ball:Sprite;
+			private var ring:Sprite;
+			private var accl:Accelerometer;
+			private var ui:UIComponent = new UIComponent();
+			
+			private var accelX:Number;
+			private var accelY:Number;
+			private var accelZ:Number;
+			
+			private var rollingX:Number = 0;
+			private var rollingY:Number = 0;
+			private var rollingZ:Number = 0;
+			
+			[Bindable] private var recording:ArrayCollection;
+			private var fname:String;
+			private var outputDir:File;
+			private var recordMode:String = "off"; // off, recording, playback			
+			private var intervalId:uint;
+			private var count:uint = 1001;
+			private var cdownStartNum:uint = 25;
+			private var cdown:uint = cdownStartNum;
+			
+			private var create:String = new String("FALSE");
+			private var accelAvg:Number;
+			private var rollAccelAvg:Number = 0;
+			private var scale:Number;
+			private var setText0:String;
+
+			private var fileStream:FileStream; 
+			private var myTimer:Timer = new Timer(1000); // 1 second
+			
+			private const FACTOR:Number = 0.1;
+			private const FACTOR2:Number = 0.2;
+			private const INTERVAL:Number = 20;
+			
+			private var userInfoPopUp:UserInfo;
+			private var idField:TextInput;
+
+			
+			//---------------------------------------------------------------------
+			//
+			//  Protected Methods
+			//
+			//---------------------------------------------------------------------
+			
+			override protected function createChildren():void 
+			{
+				super.createChildren();
+				if(!ball)
+				{
+					createBall();
+					ball.x = width/2;
+					ball.y = 600;
+					ui.addChild(ball);
+					addElement(ui);
+					
+					createRing2();
+					ring.x = ball.x;
+					ring.y = ball.y;
+					
+				}			
+			}
+			
+			
+			//---------------------------------------------------------------------
+			//
+			//	Pop up window methods
+			//
+			//---------------------------------------------------------------------
+			
+			/* Launch pop up window to query for unique ID */
+			private function launchPopUp():void
+			{
+				userInfoPopUp = UserInfo(PopUpManager.createPopUp(this, UserInfo, true));
+				userInfoPopUp.addEventListener(Event.REMOVED_FROM_STAGE, setFileName);
+			}
+			
+			/* Set the file according to the ID entered */
+			private function setFileName(evt:Event):void
+			{
+				if(idField) //ID has been entered
+				{
+					userInfoPopUp.currID = idField.text;
+					trace(userInfoPopUp.currID + ".....");
+					var file:File = new File; 
+					do {
+						var myDate:Date = new Date(); 
+						var formatter:DateFormatter = new DateFormatter();
+						formatter.formatString = "JNNSS";
+						var filename:String = formatter.format(myDate);
+						fname = "TremorData/" + userInfoPopUp.currID + "_" + filename + ".txt";
+						//fname = "TremorData/datafile" + count + ".txt";
+						file = File.desktopDirectory.resolvePath(fname);
+						count++;
+					} while (file.exists);
+				}
+			}
+			
+	
+			
+			//---------------------------------------------------------------------
+			//
+			//  Handler Methods
+			//
+			//---------------------------------------------------------------------
+			
+			private function onAddedToStage(event:Event):void 
+			{
+				if(Capabilities.cpuArchitecture=="ARM")
+				{
+					NativeApplication.nativeApplication.addEventListener(Event.ACTIVATE, handleActivate, false, 0, true);
+					NativeApplication.nativeApplication.addEventListener(Event.DEACTIVATE, handleDeactivate, false, 0, true);
+					NativeApplication.nativeApplication.addEventListener(KeyboardEvent.KEY_DOWN, handleKeys, false, 0, true);
+				}
+				//creates children
+				createChildren();
+				//creates accelerometer
+				createAccelerometer();
+				//listen for enter frame
+				addEventListener(Event.ENTER_FRAME, onEnterFrame);
+				outputDir = File.desktopDirectory.resolvePath("TremorData");
+				if (!outputDir.exists) outputDir.createDirectory();
+				
+				//launch the pop up to get the unique ID
+				launchPopUp();
+				
+				/*var file:File = new File; 
+				do {
+					var myDate:Date = new Date(); 
+					var formatter:DateFormatter = new DateFormatter();
+					formatter.formatString = "JNNSS";
+					var filename:String = formatter.format(myDate);
+					fname = "TremorData/data_" + filename + ".txt";
+					//fname = "TremorData/datafile" + count + ".txt";
+					file = File.desktopDirectory.resolvePath(fname);
+					count++;
+				} while (file.exists);	*/
+				count = count - 1;
+				cdownText.text = "Countdown: 25";
+				text.text = "Your goal is to keep the red halo inside the blue circle, till the timer counts down to 0." +
+					"\n\nThe timer resets everytime the halo goes outside the circle." +
+					"\n\nTo begin hit PLAY" +
+					"\n\nLet the games begin!";
+			}
+			
+			private function onEnterFrame(event:Event):void
+			{
+				
+				if (recordMode == "recording") {
+					var oldPosX:Number = ball.x;
+					var oldPosY:Number = ball.y;
+					var newPosX:Number = ball.x - (rollingX*50);
+					var newPosY:Number = ball.y + (rollingY*50);
+					//keep ball on stage
+					if ((newPosX > 0) && (newPosX < stage.stageWidth)) {
+						ball.x = newPosX;
+					}
+					if ((newPosY > 0) && (newPosY < stage.stageHeight-100)) {
+						ball.y = newPosY;
+					}
+					var sum:Number = Math.pow((ball.x - oldPosX),2) + Math.pow((ball.y - oldPosY),2);
+					var accelAvg:Number = Math.sqrt(sum);
+					rollAccelAvg = (accelAvg*FACTOR2) + (rollAccelAvg*(1- FACTOR2));
+					var pos:Object = new Object();
+					pos.posX = ball.x;
+					pos.posY = ball.y;
+					pos.rollingX = rollingX;
+					pos.rollingY = rollingY;
+					pos.rollingZ = rollingZ;
+					recording.addItem(pos);
+					//ring control
+					ring.visible = true;
+					ring.x = ball.x;
+					ring.y = ball.y;
+					scale = Math.log(rollAccelAvg)*Math.LOG10E/2;
+					if (scale > 0.1) {
+						ring.scaleX = scale; 
+						ring.scaleY = ring.scaleX;
+						cdown = cdownStartNum;
+					}
+					if ((newPosY > imageBorder.y) && (newPosY < imageBorder.y + imageBorder.height)) 
+						setText0 = "Hold phone flat to steady the ball";
+					else {
+						cdown = cdownStartNum;
+						setText0 = "Begin Countdown by moving the ball into the box";
+					}
+					if (cdown < 23) saveData();			
+				}
+			}
+			
+			private function onAccel_UpdateHandler(event:AccelerometerEvent):void 
+			{ 
+				accelX = event.accelerationX;
+				accelY = event.accelerationY;
+				accelZ = event.accelerationZ;
+				rollingX = (accelX * FACTOR) + (rollingX * (1 - FACTOR)); 
+				rollingY = (accelY * FACTOR) + (rollingY * (1 - FACTOR));
+				rollingZ = (accelZ * FACTOR) + (rollingZ * (1 - FACTOR)); 
+			}
+			
+			private function handleRecordButtonClick(event:MouseEvent):void 
+			{
+				if (recordMode == "off") {
+					this.currentState = 'State1';
+					ball.y = 20;
+					ui.removeChild(ring);
+					text.text = "";
+					recording = new ArrayCollection();
+					recordMode = "recording";
+					recordBtn.label = "STOP";
+					createRing();
+					var myDate:Date = new Date(); 
+					var formatter:DateFormatter = new DateFormatter();
+					formatter.formatString = "YYYYMMDD_JNNSS";
+					var filename:String = formatter.format(myDate);
+					fname = "TremorData/" + userInfoPopUp.currID + "_" + filename + ".txt";
+					var myFile:File = File.desktopDirectory.resolvePath(fname);
+					try {
+						fileStream = new FileStream();
+						fileStream.open(myFile, FileMode.WRITE);	
+					}
+					catch(error:Error) {
+						Alert.show(error.toString());
+					}
+					dataname.text = "File: " + fname;
+					myTimer.addEventListener(TimerEvent.TIMER, setText);
+					myTimer.start();
+				}
+				else if (recordMode == "recording") {
+					myTimer.stop();
+					recordMode = "off";
+					recordBtn.label = "PLAY";
+//					ui.removeChild(ring);					
+					fileStream.close();
+				}
+			}
+			
+			//---------------------------------------------------------------------
+			//
+			//  Private Methods
+			//
+			//---------------------------------------------------------------------
+			
+			private function createBall():void
+			{
+				ball = new Sprite();
+				ball.graphics.clear();
+				ball.graphics.beginFill(0x0000FF, 0.8);
+				ball.graphics.drawCircle(0, 0, 40);
+				ball.graphics.endFill();
+				ball.cacheAsBitmap = true;
+			}
+			
+			private function createRing():void
+			{
+				ring = new Sprite();
+				ring.visible = false;
+				ring.graphics.clear();
+				ring.graphics.lineStyle(50, 0xFF6600, 0.9); //thickness,color,alpha
+				ring.graphics.drawCircle(0, 0, 250);
+				ring.cacheAsBitmap = true;
+				ui.addChild(ring);
+				this.addElement(ui);
+			}
+			
+			private function createRing2():void
+			{
+				ring = new Sprite();
+				ring.visible = true;
+				ring.graphics.clear();
+				ring.graphics.lineStyle(10, 0xFF6600, 0.7); //thickness,color,alpha
+				ring.graphics.drawCircle(0, 0, 40);
+				ring.cacheAsBitmap = true;
+				ui.addChild(ring);
+				this.addElement(ui);
+			}
+			
+			
+			private function createAccelerometer():void 
+			{
+				if(Accelerometer.isSupported)
+				{
+					accl = new Accelerometer();
+					accl.setRequestedUpdateInterval(INTERVAL);
+					accl.addEventListener(AccelerometerEvent.UPDATE, onAccel_UpdateHandler);
+				}
+			}
+			
+			private function setText(event:TimerEvent):void 
+			{
+				if (cdown == 0) {
+					day.text = "";
+					text0.text = "Good Job!";
+					myTimer.stop();
+					recordMode = "off";
+					recordBtn.label = "PLAY";
+//					ui.removeChild(ring);					
+					fileStream.close();
+				}
+				else {
+					cdownText.text = "Countdown:";
+					text0.text = setText0;
+					var s:String;
+					s = cdown.toString();
+					s += "...";
+					day.text = s;
+					cdown--;
+				}
+			}	
+			
+			private function saveData():void
+			{
+				var date:Date = new Date(); 
+				var s:String = date.toLocaleString();
+				s += "\tX:" + accelX.toFixed(3);
+				s += "\tY: " + accelY.toFixed(3);
+				s += "\tZ: " + accelZ.toFixed(3) + "\n";
+				fileStream.writeUTFBytes(s);			
+			}
+			
+			private function handleActivate(event:Event):void
+			{
+				NativeApplication.nativeApplication.systemIdleMode = SystemIdleMode.KEEP_AWAKE;
+			}
+			
+			private function handleDeactivate(event:Event):void
+			{
+				NativeApplication.nativeApplication.exit();
+			}
+			
+			private function handleKeys(event:KeyboardEvent):void
+			{
+				if(event.keyCode == Keyboard.BACK)
+					NativeApplication.nativeApplication.exit();
+			}
+			
+		]]>
+	</fx:Script>
+	<s:states>
+		<s:State name="State1"/>
+		<s:State name="start"/>
+	</s:states>
+	
+	<s:BorderContainer
+		id = "imageBorder"
+		borderStyle="inset" borderWeight="2" 
+		width="423" height="519" x="29" y="157">
+		
+		<s:borderStroke>
+			<s:LinearGradientStroke weight="10" rotation="270">
+				<s:GradientEntry color="0xF655E5"/>
+				<s:GradientEntry color="0x6600CC"/>
+			</s:LinearGradientStroke>
+		</s:borderStroke>
+		<s:TextArea id="day" editable="false" restrict="" width="243" height="119" borderVisible="false" fontSize="84" fontFamily="Verdana" fontStyle="italic" x="128" y="30" color="#B50F07" includeIn="State1" textAlign="left"/>
+		<s:TextArea id="text" width="402" height="399" borderVisible="false" fontSize="28" fontFamily="Verdana" editable="false" textAlign="center" enabled="false" x="-1.15" y="20.5" includeIn="start"/>
+		<s:TextArea id="text0" width="250" height="121" borderVisible="false" fontSize="28" fontFamily="Verdana" editable="false" textAlign="center" enabled="false" x="74.85" y="171.5" includeIn="State1"/>
+		<s:TextArea includeIn="State1" x="10" y="440" height="49" width="383" id="dataname" textAlign="left" verticalAlign="middle" borderVisible="false" fontSize="20"/>
+	</s:BorderContainer>
+	<s:Button label="PLAY" enabled="true" click="handleRecordButtonClick(event);" id="recordBtn" y="723" width="246" height="61" x="110.65" fontSize="31"/>
+	<s:TextArea id="cdownText" x="39.1" y="31.85" fontSize="36" fontFamily="Verdana" width="402" height="106" borderVisible="false" fontWeight="bold" verticalAlign="middle" symbolColor="#570541" textAlign="center" color="#910561" editable="false"/>
+
+</s:Application>
